@@ -69,6 +69,7 @@ func (hp *hostPath) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 			accessTypeMount = true
 		}
 	}
+
 	// A real driver would also need to check that the other
 	// fields in VolumeCapabilities are sane. The check above is
 	// just enough to pass the "[Testpattern: Dynamic PV (block

@@ -63,6 +63,7 @@ type Config struct {
 	Endpoint                   string
 	ProxyEndpoint              string
 	NodeID                     string
+	DriverMode                 string
 	VendorVersion              string
 	StateDir                   string
 	MaxVolumesPerNode          int64
@@ -80,9 +81,9 @@ type Config struct {
 	CheckVolumeLifecycle       bool
 }
 
-var (
-	vendorVersion = "dev"
-)
+// var (
+// 	vendorVersion = "dev"
+// )
 
 const (
 	// Extension with which snapshot files will be saved.
@@ -123,8 +124,19 @@ func NewHostPathDriver(cfg Config) (*hostPath, error) {
 func (hp *hostPath) Run() error {
 	s := NewNonBlockingGRPCServer()
 	// hp itself implements ControllerServer, NodeServer, and IdentityServer.
-	s.Start(hp.config.Endpoint, hp, hp, hp)
-	s.Wait()
+	switch hp.config.DriverMode {
+	case "all":
+		s.Start(hp.config.Endpoint, hp, hp, hp)
+		s.Wait()
+	case "controller":
+		s.Start(hp.config.Endpoint, hp, hp, nil)
+		s.Wait()
+	case "node":
+		s.Start(hp.config.Endpoint, hp, nil, hp)
+		s.Wait()
+	default:
+		glog.Fatalf("unknown mode: %s", hp.config.DriverMode)
+	}
 
 	return nil
 }
