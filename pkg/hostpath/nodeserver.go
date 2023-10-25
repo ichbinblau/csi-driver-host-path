@@ -24,9 +24,11 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/glog"
 	"github.com/kubernetes-csi/csi-driver-host-path/pkg/state"
+	"github.com/pborman/uuid"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/volume/util/volumepathhandler"
 	"k8s.io/utils/mount"
 )
@@ -545,4 +547,183 @@ func isMountedElsewhere(req *csi.NodePublishVolumeRequest, vol state.Volume) boo
 		}
 	}
 	return false
+}
+
+func (hp *hostPath) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (resp *csi.CreateVolumeResponse, finalErr error) {
+	if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
+		glog.V(3).Infof("invalid create volume req: %v", req)
+		return nil, err
+	}
+
+	// Check arguments
+	if len(req.GetName()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "Name missing in request")
+	}
+	caps := req.GetVolumeCapabilities()
+	if caps == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume Capabilities missing in request")
+	}
+
+	// Keep a record of the requested access types.
+	var accessTypeMount, accessTypeBlock bool
+
+	for _, cap := range caps {
+		if cap.GetBlock() != nil {
+			accessTypeBlock = true
+		}
+		if cap.GetMount() != nil {
+			accessTypeMount = true
+		}
+	}
+
+	// A real driver would also need to check that the other
+	// fields in VolumeCapabilities are sane. The check above is
+	// just enough to pass the "[Testpattern: Dynamic PV (block
+	// volmode)] volumeMode should fail in binding dynamic
+	// provisioned PV to PVC" storage E2E test.
+
+	if accessTypeBlock && accessTypeMount {
+		return nil, status.Error(codes.InvalidArgument, "cannot have both block and mount access type")
+	}
+
+	var requestedAccessType state.AccessType
+
+	if accessTypeBlock {
+		requestedAccessType = state.BlockAccess
+	} else {
+		// Default to mount.
+		requestedAccessType = state.MountAccess
+	}
+
+	// Lock before acting on global state. A production-quality
+	// driver might use more fine-grained locking.
+	hp.mutex.Lock()
+	defer hp.mutex.Unlock()
+
+	capacity := int64(req.GetCapacityRange().GetRequiredBytes())
+	topologies := []*csi.Topology{}
+	if hp.config.EnableTopology {
+		topologies = append(topologies, &csi.Topology{Segments: map[string]string{TopologyKeyNode: hp.config.NodeID}})
+	}
+
+	// Need to check for already existing volume name, and if found
+	// check for the requested capacity and already allocated capacity
+	if exVol, err := hp.state.GetVolumeByName(req.GetName()); err == nil {
+		// Since err is nil, it means the volume with the same name already exists
+		// need to check if the size of existing volume is the same as in new
+		// request
+		if exVol.VolSize < capacity {
+			return nil, status.Errorf(codes.AlreadyExists, "Volume with the same name: %s but with different size already exist", req.GetName())
+		}
+		if req.GetVolumeContentSource() != nil {
+			volumeSource := req.VolumeContentSource
+			switch volumeSource.Type.(type) {
+			case *csi.VolumeContentSource_Snapshot:
+				if volumeSource.GetSnapshot() != nil && exVol.ParentSnapID != "" && exVol.ParentSnapID != volumeSource.GetSnapshot().GetSnapshotId() {
+					return nil, status.Error(codes.AlreadyExists, "existing volume source snapshot id not matching")
+				}
+			case *csi.VolumeContentSource_Volume:
+				if volumeSource.GetVolume() != nil && exVol.ParentVolID != volumeSource.GetVolume().GetVolumeId() {
+					return nil, status.Error(codes.AlreadyExists, "existing volume source volume id not matching")
+				}
+			default:
+				return nil, status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
+			}
+		}
+		// TODO (sbezverk) Do I need to make sure that volume still exists?
+		return &csi.CreateVolumeResponse{
+			Volume: &csi.Volume{
+				VolumeId:           exVol.VolID,
+				CapacityBytes:      int64(exVol.VolSize),
+				VolumeContext:      req.GetParameters(),
+				ContentSource:      req.GetVolumeContentSource(),
+				AccessibleTopology: topologies,
+			},
+		}, nil
+	}
+
+	volumeID := uuid.NewUUID().String()
+	kind := req.GetParameters()[storageKind]
+	vol, err := hp.createVolume(volumeID, req.GetName(), capacity, requestedAccessType, false /* ephemeral */, kind)
+	if err != nil {
+		return nil, err
+	}
+	glog.V(4).Infof("created volume %s at path %s", vol.VolID, vol.VolPath)
+
+	if req.GetVolumeContentSource() != nil {
+		path := hp.getVolumePath(volumeID)
+		volumeSource := req.VolumeContentSource
+		switch volumeSource.Type.(type) {
+		case *csi.VolumeContentSource_Snapshot:
+			if snapshot := volumeSource.GetSnapshot(); snapshot != nil {
+				err = hp.loadFromSnapshot(capacity, snapshot.GetSnapshotId(), path, requestedAccessType)
+				vol.ParentSnapID = snapshot.GetSnapshotId()
+			}
+		case *csi.VolumeContentSource_Volume:
+			if srcVolume := volumeSource.GetVolume(); srcVolume != nil {
+				err = hp.loadFromVolume(capacity, srcVolume.GetVolumeId(), path, requestedAccessType)
+				vol.ParentVolID = srcVolume.GetVolumeId()
+			}
+		default:
+			err = status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
+		}
+		if err != nil {
+			glog.V(4).Infof("VolumeSource error: %v", err)
+			if delErr := hp.deleteVolume(volumeID); delErr != nil {
+				glog.V(2).Infof("deleting hostpath volume %v failed: %v", volumeID, delErr)
+			}
+			return nil, err
+		}
+		glog.V(4).Infof("successfully populated volume %s", vol.VolID)
+	}
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:           volumeID,
+			CapacityBytes:      req.GetCapacityRange().GetRequiredBytes(),
+			VolumeContext:      req.GetParameters(),
+			ContentSource:      req.GetVolumeContentSource(),
+			AccessibleTopology: topologies,
+		},
+	}, nil
+}
+
+func (hp *hostPath) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	// Check arguments
+	if len(req.GetVolumeId()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
+	}
+
+	if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
+		glog.V(3).Infof("invalid delete volume req: %v", req)
+		return nil, err
+	}
+
+	// Lock before acting on global state. A production-quality
+	// driver might use more fine-grained locking.
+	hp.mutex.Lock()
+	defer hp.mutex.Unlock()
+
+	volId := req.GetVolumeId()
+	vol, err := hp.state.GetVolumeByID(volId)
+	if err != nil {
+		// Volume not found: might have already deleted
+		return &csi.DeleteVolumeResponse{}, nil
+	}
+
+	if vol.Attached || !vol.Published.Empty() || !vol.Staged.Empty() {
+		msg := fmt.Sprintf("Volume '%s' is still used (attached: %v, staged: %v, published: %v) by '%s' node",
+			vol.VolID, vol.Attached, vol.Staged, vol.Published, vol.NodeID)
+		if hp.config.CheckVolumeLifecycle {
+			return nil, status.Error(codes.Internal, msg)
+		}
+		klog.Warning(msg)
+	}
+
+	if err := hp.deleteVolume(volId); err != nil {
+		return nil, fmt.Errorf("failed to delete volume %v: %w", volId, err)
+	}
+	glog.V(4).Infof("volume %v successfully deleted", volId)
+
+	return &csi.DeleteVolumeResponse{}, nil
 }
