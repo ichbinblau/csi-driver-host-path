@@ -18,12 +18,8 @@ package hostpath
 
 import (
 	"fmt"
-	"math"
-	"os"
 	"sort"
 	"strconv"
-
-	"github.com/golang/protobuf/ptypes"
 
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
@@ -34,7 +30,6 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/klog/v2"
-	utilexec "k8s.io/utils/exec"
 
 	"github.com/kubernetes-csi/csi-driver-host-path/pkg/state"
 )
@@ -101,74 +96,76 @@ func (hp *hostPath) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 
 	// Need to check for already existing volume name, and if found
 	// check for the requested capacity and already allocated capacity
-	if exVol, err := hp.state.GetVolumeByName(req.GetName()); err == nil {
-		// Since err is nil, it means the volume with the same name already exists
-		// need to check if the size of existing volume is the same as in new
-		// request
-		if exVol.VolSize < capacity {
-			return nil, status.Errorf(codes.AlreadyExists, "Volume with the same name: %s but with different size already exist", req.GetName())
-		}
-		if req.GetVolumeContentSource() != nil {
-			volumeSource := req.VolumeContentSource
-			switch volumeSource.Type.(type) {
-			case *csi.VolumeContentSource_Snapshot:
-				if volumeSource.GetSnapshot() != nil && exVol.ParentSnapID != "" && exVol.ParentSnapID != volumeSource.GetSnapshot().GetSnapshotId() {
-					return nil, status.Error(codes.AlreadyExists, "existing volume source snapshot id not matching")
-				}
-			case *csi.VolumeContentSource_Volume:
-				if volumeSource.GetVolume() != nil && exVol.ParentVolID != volumeSource.GetVolume().GetVolumeId() {
-					return nil, status.Error(codes.AlreadyExists, "existing volume source volume id not matching")
-				}
-			default:
-				return nil, status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
-			}
-		}
-		// TODO (sbezverk) Do I need to make sure that volume still exists?
-		return &csi.CreateVolumeResponse{
-			Volume: &csi.Volume{
-				VolumeId:           exVol.VolID,
-				CapacityBytes:      int64(exVol.VolSize),
-				VolumeContext:      req.GetParameters(),
-				ContentSource:      req.GetVolumeContentSource(),
-				AccessibleTopology: topologies,
-			},
-		}, nil
+	if _, err := hp.state.GetVolumeByName(req.GetName()); err == nil {
+		// // Since err is nil, it means the volume with the same name already exists
+		// // need to check if the size of existing volume is the same as in new
+		// // request
+		// if exVol.VolSize < capacity {
+		// 	return nil, status.Errorf(codes.AlreadyExists, "Volume with the same name: %s but with different size already exist", req.GetName())
+		// }
+		// if req.GetVolumeContentSource() != nil {
+		// 	volumeSource := req.VolumeContentSource
+		// 	switch volumeSource.Type.(type) {
+		// 	case *csi.VolumeContentSource_Snapshot:
+		// 		if volumeSource.GetSnapshot() != nil && exVol.ParentSnapID != "" && exVol.ParentSnapID != volumeSource.GetSnapshot().GetSnapshotId() {
+		// 			return nil, status.Error(codes.AlreadyExists, "existing volume source snapshot id not matching")
+		// 		}
+		// 	case *csi.VolumeContentSource_Volume:
+		// 		if volumeSource.GetVolume() != nil && exVol.ParentVolID != volumeSource.GetVolume().GetVolumeId() {
+		// 			return nil, status.Error(codes.AlreadyExists, "existing volume source volume id not matching")
+		// 		}
+		// 	default:
+		// 		return nil, status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
+		// 	}
+		// }
+		// // TODO (sbezverk) Do I need to make sure that volume still exists?
+		// return &csi.CreateVolumeResponse{
+		// 	Volume: &csi.Volume{
+		// 		VolumeId:           exVol.VolID,
+		// 		CapacityBytes:      int64(exVol.VolSize),
+		// 		VolumeContext:      req.GetParameters(),
+		// 		ContentSource:      req.GetVolumeContentSource(),
+		// 		AccessibleTopology: topologies,
+		// 	},
+		// }, nil
+		return nil, status.Errorf(codes.AlreadyExists, "Volume with the same name: %s already exist", req.GetName())
 	}
 
 	volumeID := uuid.NewUUID().String()
 	kind := req.GetParameters()[storageKind]
+	// here may get path from pvc annotation or cr
 	vol, err := hp.createVolume(volumeID, req.GetName(), capacity, requestedAccessType, false /* ephemeral */, kind)
 	if err != nil {
 		return nil, err
 	}
 	glog.V(4).Infof("created volume %s at path %s", vol.VolID, vol.VolPath)
 
-	if req.GetVolumeContentSource() != nil {
-		path := hp.getVolumePath(volumeID)
-		volumeSource := req.VolumeContentSource
-		switch volumeSource.Type.(type) {
-		case *csi.VolumeContentSource_Snapshot:
-			if snapshot := volumeSource.GetSnapshot(); snapshot != nil {
-				err = hp.loadFromSnapshot(capacity, snapshot.GetSnapshotId(), path, requestedAccessType)
-				vol.ParentSnapID = snapshot.GetSnapshotId()
-			}
-		case *csi.VolumeContentSource_Volume:
-			if srcVolume := volumeSource.GetVolume(); srcVolume != nil {
-				err = hp.loadFromVolume(capacity, srcVolume.GetVolumeId(), path, requestedAccessType)
-				vol.ParentVolID = srcVolume.GetVolumeId()
-			}
-		default:
-			err = status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
-		}
-		if err != nil {
-			glog.V(4).Infof("VolumeSource error: %v", err)
-			if delErr := hp.deleteVolume(volumeID); delErr != nil {
-				glog.V(2).Infof("deleting hostpath volume %v failed: %v", volumeID, delErr)
-			}
-			return nil, err
-		}
-		glog.V(4).Infof("successfully populated volume %s", vol.VolID)
-	}
+	// if req.GetVolumeContentSource() != nil {
+	// path := hp.getVolumePath(volumeID)
+	// volumeSource := req.VolumeContentSource
+	// switch volumeSource.Type.(type) {
+	// case *csi.VolumeContentSource_Snapshot:
+	// 	if snapshot := volumeSource.GetSnapshot(); snapshot != nil {
+	// 		err = hp.loadFromSnapshot(capacity, snapshot.GetSnapshotId(), path, requestedAccessType)
+	// 		vol.ParentSnapID = snapshot.GetSnapshotId()
+	// 	}
+	// case *csi.VolumeContentSource_Volume:
+	// 	if srcVolume := volumeSource.GetVolume(); srcVolume != nil {
+	// 		err = hp.loadFromVolume(capacity, srcVolume.GetVolumeId(), path, requestedAccessType)
+	// 		vol.ParentVolID = srcVolume.GetVolumeId()
+	// 	}
+	// default:
+	// 	err = status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
+	// }
+	// if err != nil {
+	// 	glog.V(4).Infof("VolumeSource error: %v", err)
+	// 	if delErr := hp.deleteVolume(volumeID); delErr != nil {
+	// 		glog.V(2).Infof("deleting hostpath volume %v failed: %v", volumeID, delErr)
+	// 	}
+	// 	return nil, err
+	// }
+	// glog.V(4).Infof("successfully populated volume %s", vol.VolID)
+	// }
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -497,227 +494,230 @@ func (hp *hostPath) ControllerGetVolume(ctx context.Context, req *csi.Controller
 // CreateSnapshot uses tar command to create snapshot for hostpath volume. The tar command can quickly create
 // archives of entire directories. The host image must have "tar" binaries in /bin, /usr/sbin, or /usr/bin.
 func (hp *hostPath) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
-	if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT); err != nil {
-		glog.V(3).Infof("invalid create snapshot req: %v", req)
-		return nil, err
-	}
+	// if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT); err != nil {
+	// 	glog.V(3).Infof("invalid create snapshot req: %v", req)
+	// 	return nil, err
+	// }
 
-	if len(req.GetName()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Name missing in request")
-	}
-	// Check arguments
-	if len(req.GetSourceVolumeId()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "SourceVolumeId missing in request")
-	}
+	// if len(req.GetName()) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Name missing in request")
+	// }
+	// // Check arguments
+	// if len(req.GetSourceVolumeId()) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "SourceVolumeId missing in request")
+	// }
 
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	// Need to check for already existing snapshot name, and if found check for the
-	// requested sourceVolumeId and sourceVolumeId of snapshot that has been created.
-	if exSnap, err := hp.state.GetSnapshotByName(req.GetName()); err == nil {
-		// Since err is nil, it means the snapshot with the same name already exists need
-		// to check if the sourceVolumeId of existing snapshot is the same as in new request.
-		if exSnap.VolID == req.GetSourceVolumeId() {
-			// same snapshot has been created.
-			return &csi.CreateSnapshotResponse{
-				Snapshot: &csi.Snapshot{
-					SnapshotId:     exSnap.Id,
-					SourceVolumeId: exSnap.VolID,
-					CreationTime:   exSnap.CreationTime,
-					SizeBytes:      exSnap.SizeBytes,
-					ReadyToUse:     exSnap.ReadyToUse,
-				},
-			}, nil
-		}
-		return nil, status.Errorf(codes.AlreadyExists, "snapshot with the same name: %s but with different SourceVolumeId already exist", req.GetName())
-	}
+	// // Need to check for already existing snapshot name, and if found check for the
+	// // requested sourceVolumeId and sourceVolumeId of snapshot that has been created.
+	// if exSnap, err := hp.state.GetSnapshotByName(req.GetName()); err == nil {
+	// 	// Since err is nil, it means the snapshot with the same name already exists need
+	// 	// to check if the sourceVolumeId of existing snapshot is the same as in new request.
+	// 	if exSnap.VolID == req.GetSourceVolumeId() {
+	// 		// same snapshot has been created.
+	// 		return &csi.CreateSnapshotResponse{
+	// 			Snapshot: &csi.Snapshot{
+	// 				SnapshotId:     exSnap.Id,
+	// 				SourceVolumeId: exSnap.VolID,
+	// 				CreationTime:   exSnap.CreationTime,
+	// 				SizeBytes:      exSnap.SizeBytes,
+	// 				ReadyToUse:     exSnap.ReadyToUse,
+	// 			},
+	// 		}, nil
+	// 	}
+	// 	return nil, status.Errorf(codes.AlreadyExists, "snapshot with the same name: %s but with different SourceVolumeId already exist", req.GetName())
+	// }
 
-	volumeID := req.GetSourceVolumeId()
-	hostPathVolume, err := hp.state.GetVolumeByID(volumeID)
-	if err != nil {
-		return nil, err
-	}
+	// volumeID := req.GetSourceVolumeId()
+	// hostPathVolume, err := hp.state.GetVolumeByID(volumeID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	snapshotID := uuid.NewUUID().String()
-	creationTime := ptypes.TimestampNow()
-	volPath := hostPathVolume.VolPath
-	file := hp.getSnapshotPath(snapshotID)
+	// snapshotID := uuid.NewUUID().String()
+	// creationTime := ptypes.TimestampNow()
+	// volPath := hostPathVolume.VolPath
+	// file := hp.getSnapshotPath(snapshotID)
 
-	var cmd []string
-	if hostPathVolume.VolAccessType == state.BlockAccess {
-		glog.V(4).Infof("Creating snapshot of Raw Block Mode Volume")
-		cmd = []string{"cp", volPath, file}
-	} else {
-		glog.V(4).Infof("Creating snapshot of Filsystem Mode Volume")
-		cmd = []string{"tar", "czf", file, "-C", volPath, "."}
-	}
-	executor := utilexec.New()
-	out, err := executor.Command(cmd[0], cmd[1:]...).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("failed create snapshot: %w: %s", err, out)
-	}
+	// var cmd []string
+	// if hostPathVolume.VolAccessType == state.BlockAccess {
+	// 	glog.V(4).Infof("Creating snapshot of Raw Block Mode Volume")
+	// 	cmd = []string{"cp", volPath, file}
+	// } else {
+	// 	glog.V(4).Infof("Creating snapshot of Filsystem Mode Volume")
+	// 	cmd = []string{"tar", "czf", file, "-C", volPath, "."}
+	// }
+	// executor := utilexec.New()
+	// out, err := executor.Command(cmd[0], cmd[1:]...).CombinedOutput()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed create snapshot: %w: %s", err, out)
+	// }
 
-	glog.V(4).Infof("create volume snapshot %s", file)
-	snapshot := state.Snapshot{}
-	snapshot.Name = req.GetName()
-	snapshot.Id = snapshotID
-	snapshot.VolID = volumeID
-	snapshot.Path = file
-	snapshot.CreationTime = creationTime
-	snapshot.SizeBytes = hostPathVolume.VolSize
-	snapshot.ReadyToUse = true
+	// glog.V(4).Infof("create volume snapshot %s", file)
+	// snapshot := state.Snapshot{}
+	// snapshot.Name = req.GetName()
+	// snapshot.Id = snapshotID
+	// snapshot.VolID = volumeID
+	// snapshot.Path = file
+	// snapshot.CreationTime = creationTime
+	// snapshot.SizeBytes = hostPathVolume.VolSize
+	// snapshot.ReadyToUse = true
 
-	if err := hp.state.UpdateSnapshot(snapshot); err != nil {
-		return nil, err
-	}
-	return &csi.CreateSnapshotResponse{
-		Snapshot: &csi.Snapshot{
-			SnapshotId:     snapshot.Id,
-			SourceVolumeId: snapshot.VolID,
-			CreationTime:   snapshot.CreationTime,
-			SizeBytes:      snapshot.SizeBytes,
-			ReadyToUse:     snapshot.ReadyToUse,
-		},
-	}, nil
+	// if err := hp.state.UpdateSnapshot(snapshot); err != nil {
+	// 	return nil, err
+	// }
+	// return &csi.CreateSnapshotResponse{
+	// 	Snapshot: &csi.Snapshot{
+	// 		SnapshotId:     snapshot.Id,
+	// 		SourceVolumeId: snapshot.VolID,
+	// 		CreationTime:   snapshot.CreationTime,
+	// 		SizeBytes:      snapshot.SizeBytes,
+	// 		ReadyToUse:     snapshot.ReadyToUse,
+	// 	},
+	// }, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
-	// Check arguments
-	if len(req.GetSnapshotId()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Snapshot ID missing in request")
-	}
+	// // Check arguments
+	// if len(req.GetSnapshotId()) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Snapshot ID missing in request")
+	// }
 
-	if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT); err != nil {
-		glog.V(3).Infof("invalid delete snapshot req: %v", req)
-		return nil, err
-	}
-	snapshotID := req.GetSnapshotId()
+	// if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT); err != nil {
+	// 	glog.V(3).Infof("invalid delete snapshot req: %v", req)
+	// 	return nil, err
+	// }
+	// snapshotID := req.GetSnapshotId()
 
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	glog.V(4).Infof("deleting snapshot %s", snapshotID)
-	path := hp.getSnapshotPath(snapshotID)
-	os.RemoveAll(path)
-	if err := hp.state.DeleteSnapshot(snapshotID); err != nil {
-		return nil, err
-	}
-	return &csi.DeleteSnapshotResponse{}, nil
+	// glog.V(4).Infof("deleting snapshot %s", snapshotID)
+	// path := hp.getSnapshotPath(snapshotID)
+	// os.RemoveAll(path)
+	// if err := hp.state.DeleteSnapshot(snapshotID); err != nil {
+	// 	return nil, err
+	// }
+	// return &csi.DeleteSnapshotResponse{}, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS); err != nil {
-		glog.V(3).Infof("invalid list snapshot req: %v", req)
-		return nil, err
-	}
+	// if err := hp.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS); err != nil {
+	// 	glog.V(3).Infof("invalid list snapshot req: %v", req)
+	// 	return nil, err
+	// }
 
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	// case 1: SnapshotId is not empty, return snapshots that match the snapshot id,
-	// none if not found.
-	if len(req.GetSnapshotId()) != 0 {
-		snapshotID := req.SnapshotId
-		if snapshot, err := hp.state.GetSnapshotByID(snapshotID); err == nil {
-			return convertSnapshot(snapshot), nil
-		}
-		return &csi.ListSnapshotsResponse{}, nil
-	}
+	// // case 1: SnapshotId is not empty, return snapshots that match the snapshot id,
+	// // none if not found.
+	// if len(req.GetSnapshotId()) != 0 {
+	// 	snapshotID := req.SnapshotId
+	// 	if snapshot, err := hp.state.GetSnapshotByID(snapshotID); err == nil {
+	// 		return convertSnapshot(snapshot), nil
+	// 	}
+	// 	return &csi.ListSnapshotsResponse{}, nil
+	// }
 
-	// case 2: SourceVolumeId is not empty, return snapshots that match the source volume id,
-	// none if not found.
-	if len(req.GetSourceVolumeId()) != 0 {
-		for _, snapshot := range hp.state.GetSnapshots() {
-			if snapshot.VolID == req.SourceVolumeId {
-				return convertSnapshot(snapshot), nil
-			}
-		}
-		return &csi.ListSnapshotsResponse{}, nil
-	}
+	// // case 2: SourceVolumeId is not empty, return snapshots that match the source volume id,
+	// // none if not found.
+	// if len(req.GetSourceVolumeId()) != 0 {
+	// 	for _, snapshot := range hp.state.GetSnapshots() {
+	// 		if snapshot.VolID == req.SourceVolumeId {
+	// 			return convertSnapshot(snapshot), nil
+	// 		}
+	// 	}
+	// 	return &csi.ListSnapshotsResponse{}, nil
+	// }
 
-	var snapshots []csi.Snapshot
-	// case 3: no parameter is set, so we return all the snapshots.
-	hpSnapshots := hp.state.GetSnapshots()
-	sort.Slice(hpSnapshots, func(i, j int) bool {
-		return hpSnapshots[i].Id < hpSnapshots[j].Id
-	})
+	// var snapshots []csi.Snapshot
+	// // case 3: no parameter is set, so we return all the snapshots.
+	// hpSnapshots := hp.state.GetSnapshots()
+	// sort.Slice(hpSnapshots, func(i, j int) bool {
+	// 	return hpSnapshots[i].Id < hpSnapshots[j].Id
+	// })
 
-	for _, snap := range hpSnapshots {
-		snapshot := csi.Snapshot{
-			SnapshotId:     snap.Id,
-			SourceVolumeId: snap.VolID,
-			CreationTime:   snap.CreationTime,
-			SizeBytes:      snap.SizeBytes,
-			ReadyToUse:     snap.ReadyToUse,
-		}
-		snapshots = append(snapshots, snapshot)
-	}
+	// for _, snap := range hpSnapshots {
+	// 	snapshot := csi.Snapshot{
+	// 		SnapshotId:     snap.Id,
+	// 		SourceVolumeId: snap.VolID,
+	// 		CreationTime:   snap.CreationTime,
+	// 		SizeBytes:      snap.SizeBytes,
+	// 		ReadyToUse:     snap.ReadyToUse,
+	// 	}
+	// 	snapshots = append(snapshots, snapshot)
+	// }
 
-	var (
-		ulenSnapshots = int32(len(snapshots))
-		maxEntries    = req.MaxEntries
-		startingToken int32
-		maxToken      = uint32(math.MaxUint32)
-	)
+	// var (
+	// 	ulenSnapshots = int32(len(snapshots))
+	// 	maxEntries    = req.MaxEntries
+	// 	startingToken int32
+	// 	maxToken      = uint32(math.MaxUint32)
+	// )
 
-	if v := req.StartingToken; v != "" {
-		i, err := strconv.ParseUint(v, 10, 32)
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Aborted,
-				"startingToken=%d !< int32=%d",
-				startingToken, maxToken)
-		}
-		startingToken = int32(i)
-	}
+	// if v := req.StartingToken; v != "" {
+	// 	i, err := strconv.ParseUint(v, 10, 32)
+	// 	if err != nil {
+	// 		return nil, status.Errorf(
+	// 			codes.Aborted,
+	// 			"startingToken=%d !< int32=%d",
+	// 			startingToken, maxToken)
+	// 	}
+	// 	startingToken = int32(i)
+	// }
 
-	if startingToken > ulenSnapshots {
-		return nil, status.Errorf(
-			codes.Aborted,
-			"startingToken=%d > len(snapshots)=%d",
-			startingToken, ulenSnapshots)
-	}
+	// if startingToken > ulenSnapshots {
+	// 	return nil, status.Errorf(
+	// 		codes.Aborted,
+	// 		"startingToken=%d > len(snapshots)=%d",
+	// 		startingToken, ulenSnapshots)
+	// }
 
-	// Discern the number of remaining entries.
-	rem := ulenSnapshots - startingToken
+	// // Discern the number of remaining entries.
+	// rem := ulenSnapshots - startingToken
 
-	// If maxEntries is 0 or greater than the number of remaining entries then
-	// set maxEntries to the number of remaining entries.
-	if maxEntries == 0 || maxEntries > rem {
-		maxEntries = rem
-	}
+	// // If maxEntries is 0 or greater than the number of remaining entries then
+	// // set maxEntries to the number of remaining entries.
+	// if maxEntries == 0 || maxEntries > rem {
+	// 	maxEntries = rem
+	// }
 
-	var (
-		i       int
-		j       = startingToken
-		entries = make(
-			[]*csi.ListSnapshotsResponse_Entry,
-			maxEntries)
-	)
+	// var (
+	// 	i       int
+	// 	j       = startingToken
+	// 	entries = make(
+	// 		[]*csi.ListSnapshotsResponse_Entry,
+	// 		maxEntries)
+	// )
 
-	for i = 0; i < len(entries); i++ {
-		entries[i] = &csi.ListSnapshotsResponse_Entry{
-			Snapshot: &snapshots[j],
-		}
-		j++
-	}
+	// for i = 0; i < len(entries); i++ {
+	// 	entries[i] = &csi.ListSnapshotsResponse_Entry{
+	// 		Snapshot: &snapshots[j],
+	// 	}
+	// 	j++
+	// }
 
-	var nextToken string
-	if j < ulenSnapshots {
-		nextToken = fmt.Sprintf("%d", j)
-	}
+	// var nextToken string
+	// if j < ulenSnapshots {
+	// 	nextToken = fmt.Sprintf("%d", j)
+	// }
 
-	return &csi.ListSnapshotsResponse{
-		Entries:   entries,
-		NextToken: nextToken,
-	}, nil
+	// return &csi.ListSnapshotsResponse{
+	// 	Entries:   entries,
+	// 	NextToken: nextToken,
+	// }, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
@@ -763,25 +763,25 @@ func (hp *hostPath) ControllerExpandVolume(ctx context.Context, req *csi.Control
 	}, nil
 }
 
-func convertSnapshot(snap state.Snapshot) *csi.ListSnapshotsResponse {
-	entries := []*csi.ListSnapshotsResponse_Entry{
-		{
-			Snapshot: &csi.Snapshot{
-				SnapshotId:     snap.Id,
-				SourceVolumeId: snap.VolID,
-				CreationTime:   snap.CreationTime,
-				SizeBytes:      snap.SizeBytes,
-				ReadyToUse:     snap.ReadyToUse,
-			},
-		},
-	}
+// func convertSnapshot(snap state.Snapshot) *csi.ListSnapshotsResponse {
+// 	entries := []*csi.ListSnapshotsResponse_Entry{
+// 		{
+// 			Snapshot: &csi.Snapshot{
+// 				SnapshotId:     snap.Id,
+// 				SourceVolumeId: snap.VolID,
+// 				CreationTime:   snap.CreationTime,
+// 				SizeBytes:      snap.SizeBytes,
+// 				ReadyToUse:     snap.ReadyToUse,
+// 			},
+// 		},
+// 	}
 
-	rsp := &csi.ListSnapshotsResponse{
-		Entries: entries,
-	}
+// 	rsp := &csi.ListSnapshotsResponse{
+// 		Entries: entries,
+// 	}
 
-	return rsp
-}
+// 	return rsp
+// }
 
 func (hp *hostPath) validateControllerServiceRequest(c csi.ControllerServiceCapability_RPC_Type) error {
 	if c == csi.ControllerServiceCapability_RPC_UNKNOWN {
@@ -803,10 +803,10 @@ func (hp *hostPath) getControllerServiceCapabilities() []*csi.ControllerServiceC
 			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 			csi.ControllerServiceCapability_RPC_GET_VOLUME,
 			csi.ControllerServiceCapability_RPC_GET_CAPACITY,
-			csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-			csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
+			// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+			// csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
 			csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
-			csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+			// csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 			csi.ControllerServiceCapability_RPC_VOLUME_CONDITION,
 			csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 		}

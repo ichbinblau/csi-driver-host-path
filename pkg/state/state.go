@@ -36,14 +36,14 @@ const (
 )
 
 type Volume struct {
-	VolName        string
-	VolID          string
-	VolSize        int64
-	VolPath        string
-	VolAccessType  AccessType
-	ParentVolID    string
-	ParentSnapID   string
-	Ephemeral      bool
+	VolName       string
+	VolID         string
+	VolSize       int64
+	VolPath       string
+	VolAccessType AccessType
+	ParentVolID   string
+	ParentSnapID  string
+	// Ephemeral      bool
 	NodeID         string
 	Kind           string
 	ReadOnlyAttach bool

@@ -216,8 +216,8 @@ func (hp *hostPath) createVolume(volID, name string, cap int64, volAccessType st
 		VolSize:       cap,
 		VolPath:       path,
 		VolAccessType: volAccessType,
-		Ephemeral:     ephemeral,
-		Kind:          kind,
+		// Ephemeral:     ephemeral,
+		Kind: kind,
 	}
 	glog.V(4).Infof("adding hostpath volume: %s = %+v", volID, volume)
 	if err := hp.state.UpdateVolume(volume); err != nil {

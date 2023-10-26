@@ -16,7 +16,8 @@ FROM alpine
 LABEL maintainers="Kubernetes Authors"
 LABEL description="HostPath Driver"
 ARG binary=./bin/hostpathplugin
-
+ENV HTTPS_PROXY=http://child-prc.intel.com:913
+ENV HTTP_PROXY=http://child-prc.intel.com:913
 # Add util-linux to get a new version of losetup.
 RUN apk add util-linux coreutils && apk update && apk upgrade
 COPY ${binary} /hostpathplugin

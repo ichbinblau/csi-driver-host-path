@@ -50,8 +50,8 @@ func (hp *hostPath) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 	}
 
 	targetPath := req.GetTargetPath()
-	ephemeralVolume := req.GetVolumeContext()["csi.storage.k8s.io/ephemeral"] == "true" ||
-		req.GetVolumeContext()["csi.storage.k8s.io/ephemeral"] == "" && hp.config.Ephemeral // Kubernetes 1.15 doesn't have csi.storage.k8s.io/ephemeral.
+	// ephemeralVolume := req.GetVolumeContext()["csi.storage.k8s.io/ephemeral"] == "true" ||
+	// 	req.GetVolumeContext()["csi.storage.k8s.io/ephemeral"] == "" && hp.config.Ephemeral // Kubernetes 1.15 doesn't have csi.storage.k8s.io/ephemeral.
 
 	if req.GetVolumeCapability().GetBlock() != nil &&
 		req.GetVolumeCapability().GetMount() != nil {
@@ -65,20 +65,20 @@ func (hp *hostPath) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 
 	mounter := mount.New("")
 
-	// if ephemeral is specified, create volume here to avoid errors
-	if ephemeralVolume {
-		volID := req.GetVolumeId()
-		volName := fmt.Sprintf("ephemeral-%s", volID)
-		kind := req.GetVolumeContext()[storageKind]
-		// Configurable size would be nice. For now we use a small, fixed volume size of 100Mi.
-		volSize := int64(100 * 1024 * 1024)
-		vol, err := hp.createVolume(req.GetVolumeId(), volName, volSize, state.MountAccess, ephemeralVolume, kind)
-		if err != nil && !os.IsExist(err) {
-			glog.Error("ephemeral mode failed to create volume: ", err)
-			return nil, err
-		}
-		glog.V(4).Infof("ephemeral mode: created volume: %s", vol.VolPath)
-	}
+	// // if ephemeral is specified, create volume here to avoid errors
+	// if ephemeralVolume {
+	// 	volID := req.GetVolumeId()
+	// 	volName := fmt.Sprintf("ephemeral-%s", volID)
+	// 	kind := req.GetVolumeContext()[storageKind]
+	// 	// Configurable size would be nice. For now we use a small, fixed volume size of 100Mi.
+	// 	volSize := int64(100 * 1024 * 1024)
+	// 	vol, err := hp.createVolume(req.GetVolumeId(), volName, volSize, state.MountAccess, ephemeralVolume, kind)
+	// 	if err != nil && !os.IsExist(err) {
+	// 		glog.Error("ephemeral mode failed to create volume: ", err)
+	// 		return nil, err
+	// 	}
+	// 	glog.V(4).Infof("ephemeral mode: created volume: %s", vol.VolPath)
+	// }
 
 	vol, err := hp.state.GetVolumeByID(req.GetVolumeId())
 	if err != nil {
@@ -89,14 +89,14 @@ func (hp *hostPath) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		return nil, status.Error(codes.FailedPrecondition, failedPreconditionAccessModeConflict)
 	}
 
-	if !ephemeralVolume {
-		if vol.Staged.Empty() {
-			return nil, status.Errorf(codes.FailedPrecondition, "volume %q must be staged before publishing", vol.VolID)
-		}
-		if !vol.Staged.Has(req.GetStagingTargetPath()) {
-			return nil, status.Errorf(codes.InvalidArgument, "volume %q was staged at %v, not %q", vol.VolID, vol.Staged, req.GetStagingTargetPath())
-		}
+	// if !ephemeralVolume {
+	if vol.Staged.Empty() {
+		return nil, status.Errorf(codes.FailedPrecondition, "volume %q must be staged before publishing", vol.VolID)
 	}
+	if !vol.Staged.Has(req.GetStagingTargetPath()) {
+		return nil, status.Errorf(codes.InvalidArgument, "volume %q was staged at %v, not %q", vol.VolID, vol.Staged, req.GetStagingTargetPath())
+	}
+	// }
 
 	if req.GetVolumeCapability().GetBlock() != nil {
 		if vol.VolAccessType != state.BlockAccess {
@@ -185,11 +185,11 @@ func (hp *hostPath) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		if err := mounter.Mount(path, targetPath, "", options); err != nil {
 			var errList strings.Builder
 			errList.WriteString(err.Error())
-			if vol.Ephemeral {
-				if rmErr := os.RemoveAll(path); rmErr != nil && !os.IsNotExist(rmErr) {
-					errList.WriteString(fmt.Sprintf(" :%s", rmErr.Error()))
-				}
-			}
+			// if vol.Ephemeral {
+			// 	if rmErr := os.RemoveAll(path); rmErr != nil && !os.IsNotExist(rmErr) {
+			// 		errList.WriteString(fmt.Sprintf(" :%s", rmErr.Error()))
+			// 	}
+			// }
 			return nil, fmt.Errorf("failed to mount device: %s at %s: %s", path, targetPath, errList.String())
 		}
 	}
@@ -248,17 +248,17 @@ func (hp *hostPath) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 	}
 	glog.V(4).Infof("hostpath: volume %s has been unpublished.", targetPath)
 
-	if vol.Ephemeral {
-		glog.V(4).Infof("deleting volume %s", volumeID)
-		if err := hp.deleteVolume(volumeID); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to delete volume: %w", err)
-		}
-	} else {
-		vol.Published.Remove(targetPath)
-		if err := hp.state.UpdateVolume(vol); err != nil {
-			return nil, err
-		}
+	// if vol.Ephemeral {
+	// 	glog.V(4).Infof("deleting volume %s", volumeID)
+	// 	if err := hp.deleteVolume(volumeID); err != nil && !os.IsNotExist(err) {
+	// 		return nil, fmt.Errorf("failed to delete volume: %w", err)
+	// 	}
+	// } else {
+	vol.Published.Remove(targetPath)
+	if err := hp.state.UpdateVolume(vol); err != nil {
+		return nil, err
 	}
+	// }
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }

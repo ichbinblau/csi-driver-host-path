@@ -27,7 +27,7 @@ CMDS_DIR ?= cmd
 
 # This is the default. It can be overridden in the main Makefile after
 # including build.make.
-REGISTRY_NAME?=quay.io/k8scsi
+REGISTRY_NAME?=onap-vim1.sh.intel.com:5000
 
 # Can be set to -mod=vendor to ensure that the "vendor" directory is used.
 GOFLAGS_VENDOR=
