@@ -396,15 +396,15 @@ func (hp *hostPath) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCap
 			},
 		},
 	}
-	if hp.config.EnableVolumeExpansion && !hp.config.DisableNodeExpansion {
-		caps = append(caps, &csi.NodeServiceCapability{
-			Type: &csi.NodeServiceCapability_Rpc{
-				Rpc: &csi.NodeServiceCapability_RPC{
-					Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
-				},
-			},
-		})
-	}
+	// if hp.config.EnableVolumeExpansion && !hp.config.DisableNodeExpansion {
+	// 	caps = append(caps, &csi.NodeServiceCapability{
+	// 		Type: &csi.NodeServiceCapability_Rpc{
+	// 			Rpc: &csi.NodeServiceCapability_RPC{
+	// 				Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+	// 			},
+	// 		},
+	// 	})
+	// }
 
 	return &csi.NodeGetCapabilitiesResponse{Capabilities: caps}, nil
 }
@@ -462,56 +462,56 @@ func (hp *hostPath) NodeGetVolumeStats(ctx context.Context, in *csi.NodeGetVolum
 
 // NodeExpandVolume is only implemented so the driver can be used for e2e testing.
 func (hp *hostPath) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	if !hp.config.EnableVolumeExpansion {
-		return nil, status.Error(codes.Unimplemented, "NodeExpandVolume is not supported")
-	}
+	// if !hp.config.EnableVolumeExpansion {
+	// 	return nil, status.Error(codes.Unimplemented, "NodeExpandVolume is not supported")
+	// }
 
-	volID := req.GetVolumeId()
-	if len(volID) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
-	}
+	// volID := req.GetVolumeId()
+	// if len(volID) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
+	// }
 
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	vol, err := hp.state.GetVolumeByID(volID)
-	if err != nil {
-		return nil, err
-	}
+	// vol, err := hp.state.GetVolumeByID(volID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	volPath := req.GetVolumePath()
-	if len(volPath) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume path not provided")
-	}
+	// volPath := req.GetVolumePath()
+	// if len(volPath) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume path not provided")
+	// }
 
-	capRange := req.GetCapacityRange()
-	if capRange == nil {
-		return nil, status.Error(codes.InvalidArgument, "Capacity range not provided")
-	}
-	capacity := int64(capRange.GetRequiredBytes())
-	if capacity > hp.config.MaxVolumeExpansionSizeNode {
-		return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, hp.config.MaxVolumeExpansionSizeNode)
-	}
+	// capRange := req.GetCapacityRange()
+	// if capRange == nil {
+	// 	return nil, status.Error(codes.InvalidArgument, "Capacity range not provided")
+	// }
+	// capacity := int64(capRange.GetRequiredBytes())
+	// if capacity > hp.config.MaxVolumeExpansionSizeNode {
+	// 	return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, hp.config.MaxVolumeExpansionSizeNode)
+	// }
 
-	info, err := os.Stat(volPath)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Could not get file information from %s: %v", volPath, err)
-	}
+	// info, err := os.Stat(volPath)
+	// if err != nil {
+	// 	return nil, status.Errorf(codes.InvalidArgument, "Could not get file information from %s: %v", volPath, err)
+	// }
 
-	switch m := info.Mode(); {
-	case m.IsDir():
-		if vol.VolAccessType != state.MountAccess {
-			return nil, status.Errorf(codes.InvalidArgument, "Volume %s is not a directory", volID)
-		}
-	case m&os.ModeDevice != 0:
-		if vol.VolAccessType != state.BlockAccess {
-			return nil, status.Errorf(codes.InvalidArgument, "Volume %s is not a block device", volID)
-		}
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Volume %s is invalid", volID)
-	}
+	// switch m := info.Mode(); {
+	// case m.IsDir():
+	// 	if vol.VolAccessType != state.MountAccess {
+	// 		return nil, status.Errorf(codes.InvalidArgument, "Volume %s is not a directory", volID)
+	// 	}
+	// case m&os.ModeDevice != 0:
+	// 	if vol.VolAccessType != state.BlockAccess {
+	// 		return nil, status.Errorf(codes.InvalidArgument, "Volume %s is not a block device", volID)
+	// 	}
+	// default:
+	// 	return nil, status.Errorf(codes.InvalidArgument, "Volume %s is invalid", volID)
+	// }
 
 	return &csi.NodeExpandVolumeResponse{}, nil
 }

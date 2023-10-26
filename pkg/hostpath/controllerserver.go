@@ -721,46 +721,47 @@ func (hp *hostPath) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReq
 }
 
 func (hp *hostPath) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
-	if !hp.config.EnableVolumeExpansion {
-		return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume is not supported")
-	}
+	// if !hp.config.EnableVolumeExpansion {
+	// 	return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume is not supported")
+	// }
 
-	volID := req.GetVolumeId()
-	if len(volID) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
-	}
+	// volID := req.GetVolumeId()
+	// if len(volID) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
+	// }
 
-	capRange := req.GetCapacityRange()
-	if capRange == nil {
-		return nil, status.Error(codes.InvalidArgument, "Capacity range not provided")
-	}
+	// capRange := req.GetCapacityRange()
+	// if capRange == nil {
+	// 	return nil, status.Error(codes.InvalidArgument, "Capacity range not provided")
+	// }
 
-	capacity := int64(capRange.GetRequiredBytes())
-	if capacity > hp.config.MaxVolumeSize {
-		return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, hp.config.MaxVolumeSize)
-	}
+	// capacity := int64(capRange.GetRequiredBytes())
+	// if capacity > hp.config.MaxVolumeSize {
+	// 	return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, hp.config.MaxVolumeSize)
+	// }
 
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	exVol, err := hp.state.GetVolumeByID(volID)
-	if err != nil {
-		return nil, err
-	}
+	// exVol, err := hp.state.GetVolumeByID(volID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	if exVol.VolSize < capacity {
-		exVol.VolSize = capacity
-		if err := hp.state.UpdateVolume(exVol); err != nil {
-			return nil, err
-		}
-	}
+	// if exVol.VolSize < capacity {
+	// 	exVol.VolSize = capacity
+	// 	if err := hp.state.UpdateVolume(exVol); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
-	return &csi.ControllerExpandVolumeResponse{
-		CapacityBytes:         exVol.VolSize,
-		NodeExpansionRequired: true,
-	}, nil
+	// return &csi.ControllerExpandVolumeResponse{
+	// 	CapacityBytes:         exVol.VolSize,
+	// 	NodeExpansionRequired: true,
+	// }, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 // func convertSnapshot(snap state.Snapshot) *csi.ListSnapshotsResponse {
@@ -810,9 +811,9 @@ func (hp *hostPath) getControllerServiceCapabilities() []*csi.ControllerServiceC
 			csi.ControllerServiceCapability_RPC_VOLUME_CONDITION,
 			csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 		}
-		if hp.config.EnableVolumeExpansion && !hp.config.DisableControllerExpansion {
-			cl = append(cl, csi.ControllerServiceCapability_RPC_EXPAND_VOLUME)
-		}
+		// if hp.config.EnableVolumeExpansion && !hp.config.DisableControllerExpansion {
+		// 	cl = append(cl, csi.ControllerServiceCapability_RPC_EXPAND_VOLUME)
+		// }
 		if hp.config.EnableAttach {
 			cl = append(cl, csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME)
 		}
