@@ -30,7 +30,7 @@ spec:
             - -v=5
             - --csi-address=/csi/csi.sock
             - --feature-gates=Topology=true
-            - --enable-capacity
+            # - --enable-capacity
             - --capacity-ownerref-level=0 # pod is owner
             - --node-deployment=true
             - --strict-topology=true
@@ -85,14 +85,15 @@ spec:
             name: csi-data-dir
 
         - name: hostpath
-          image: registry.k8s.io/sig-storage/hostpathplugin:v1.7.3
+          image: onap-vim1.sh.intel.com:5000/hostpathplugin:latest
+          imagePullPolicy: Always
           args:
             - --drivername=hostpath.csi.k8s.io
             - --v=5
             - --endpoint=$(CSI_ENDPOINT)
             - --nodeid=$(KUBE_NODE_NAME)
-            - --capacity=slow=10Gi
-            - --capacity=fast=100Gi
+            # - --capacity=slow=10Gi
+            # - --capacity=fast=100Gi
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock

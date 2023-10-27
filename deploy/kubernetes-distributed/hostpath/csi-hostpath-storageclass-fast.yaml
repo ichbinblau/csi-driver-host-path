@@ -9,5 +9,5 @@ metadata:
     app.kubernetes.io/component: storageclass
 provisioner: hostpath.csi.k8s.io
 volumeBindingMode: WaitForFirstConsumer
-parameters:
-  kind: fast
+# parameters:
+#   kind: fast
