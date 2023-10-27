@@ -262,100 +262,102 @@ func (hp *hostPath) ValidateVolumeCapabilities(ctx context.Context, req *csi.Val
 }
 
 func (hp *hostPath) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	if !hp.config.EnableAttach {
-		return nil, status.Error(codes.Unimplemented, "ControllerPublishVolume is not supported")
-	}
+	// if !hp.config.EnableAttach {
+	// 	return nil, status.Error(codes.Unimplemented, "ControllerPublishVolume is not supported")
+	// }
 
-	if len(req.VolumeId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
-	}
-	if len(req.NodeId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Node ID cannot be empty")
-	}
-	if req.VolumeCapability == nil {
-		return nil, status.Error(codes.InvalidArgument, "Volume Capabilities cannot be empty")
-	}
+	// if len(req.VolumeId) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
+	// }
+	// if len(req.NodeId) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Node ID cannot be empty")
+	// }
+	// if req.VolumeCapability == nil {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume Capabilities cannot be empty")
+	// }
 
-	if req.NodeId != hp.config.NodeID {
-		return nil, status.Errorf(codes.NotFound, "Not matching Node ID %s to hostpath Node ID %s", req.NodeId, hp.config.NodeID)
-	}
+	// if req.NodeId != hp.config.NodeID {
+	// 	return nil, status.Errorf(codes.NotFound, "Not matching Node ID %s to hostpath Node ID %s", req.NodeId, hp.config.NodeID)
+	// }
 
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	vol, err := hp.state.GetVolumeByID(req.VolumeId)
-	if err != nil {
-		return nil, status.Error(codes.NotFound, err.Error())
-	}
+	// vol, err := hp.state.GetVolumeByID(req.VolumeId)
+	// if err != nil {
+	// 	return nil, status.Error(codes.NotFound, err.Error())
+	// }
 
-	// Check to see if the volume is already published.
-	if vol.Attached {
-		// Check if readonly flag is compatible with the publish request.
-		if req.GetReadonly() != vol.ReadOnlyAttach {
-			return nil, status.Error(codes.AlreadyExists, "Volume published but has incompatible readonly flag")
-		}
+	// // Check to see if the volume is already published.
+	// if vol.Attached {
+	// 	// Check if readonly flag is compatible with the publish request.
+	// 	if req.GetReadonly() != vol.ReadOnlyAttach {
+	// 		return nil, status.Error(codes.AlreadyExists, "Volume published but has incompatible readonly flag")
+	// 	}
 
-		return &csi.ControllerPublishVolumeResponse{
-			PublishContext: map[string]string{},
-		}, nil
-	}
+	// 	return &csi.ControllerPublishVolumeResponse{
+	// 		PublishContext: map[string]string{},
+	// 	}, nil
+	// }
 
-	// Check attach limit before publishing.
-	if hp.config.AttachLimit > 0 && hp.getAttachCount() >= hp.config.AttachLimit {
-		return nil, status.Errorf(codes.ResourceExhausted, "Cannot attach any more volumes to this node ('%s')", hp.config.NodeID)
-	}
+	// // Check attach limit before publishing.
+	// if hp.config.AttachLimit > 0 && hp.getAttachCount() >= hp.config.AttachLimit {
+	// 	return nil, status.Errorf(codes.ResourceExhausted, "Cannot attach any more volumes to this node ('%s')", hp.config.NodeID)
+	// }
 
-	vol.Attached = true
-	vol.ReadOnlyAttach = req.GetReadonly()
-	if err := hp.state.UpdateVolume(vol); err != nil {
-		return nil, err
-	}
+	// vol.Attached = true
+	// vol.ReadOnlyAttach = req.GetReadonly()
+	// if err := hp.state.UpdateVolume(vol); err != nil {
+	// 	return nil, err
+	// }
 
-	return &csi.ControllerPublishVolumeResponse{
-		PublishContext: map[string]string{},
-	}, nil
+	// return &csi.ControllerPublishVolumeResponse{
+	// 	PublishContext: map[string]string{},
+	// }, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
-	if !hp.config.EnableAttach {
-		return nil, status.Error(codes.Unimplemented, "ControllerUnpublishVolume is not supported")
-	}
+	// if !hp.config.EnableAttach {
+	// 	return nil, status.Error(codes.Unimplemented, "ControllerUnpublishVolume is not supported")
+	// }
 
-	if len(req.VolumeId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
-	}
+	// if len(req.VolumeId) == 0 {
+	// 	return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
+	// }
 
-	// Empty node id is not a failure as per Spec
-	if req.NodeId != "" && req.NodeId != hp.config.NodeID {
-		return nil, status.Errorf(codes.NotFound, "Node ID %s does not match to expected Node ID %s", req.NodeId, hp.config.NodeID)
-	}
+	// // Empty node id is not a failure as per Spec
+	// if req.NodeId != "" && req.NodeId != hp.config.NodeID {
+	// 	return nil, status.Errorf(codes.NotFound, "Node ID %s does not match to expected Node ID %s", req.NodeId, hp.config.NodeID)
+	// }
 
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	vol, err := hp.state.GetVolumeByID(req.VolumeId)
-	if err != nil {
-		// Not an error: a non-existent volume is not published.
-		// See also https://github.com/kubernetes-csi/external-attacher/pull/165
-		return &csi.ControllerUnpublishVolumeResponse{}, nil
-	}
+	// vol, err := hp.state.GetVolumeByID(req.VolumeId)
+	// if err != nil {
+	// 	// Not an error: a non-existent volume is not published.
+	// 	// See also https://github.com/kubernetes-csi/external-attacher/pull/165
+	// 	return &csi.ControllerUnpublishVolumeResponse{}, nil
+	// }
 
-	// Check to see if the volume is staged/published on a node
-	if !vol.Published.Empty() || !vol.Staged.Empty() {
-		msg := fmt.Sprintf("Volume '%s' is still used (staged: %v, published: %v) by '%s' node",
-			vol.VolID, vol.Staged, vol.Published, vol.NodeID)
-		if hp.config.CheckVolumeLifecycle {
-			return nil, status.Error(codes.Internal, msg)
-		}
-		klog.Warning(msg)
-	}
+	// // Check to see if the volume is staged/published on a node
+	// if !vol.Published.Empty() || !vol.Staged.Empty() {
+	// 	msg := fmt.Sprintf("Volume '%s' is still used (staged: %v, published: %v) by '%s' node",
+	// 		vol.VolID, vol.Staged, vol.Published, vol.NodeID)
+	// 	if hp.config.CheckVolumeLifecycle {
+	// 		return nil, status.Error(codes.Internal, msg)
+	// 	}
+	// 	klog.Warning(msg)
+	// }
 
-	vol.Attached = false
-	if err := hp.state.UpdateVolume(vol); err != nil {
-		return nil, status.Errorf(codes.Internal, "could not update volume %s: %v", vol.VolID, err)
-	}
+	// vol.Attached = false
+	// if err := hp.state.UpdateVolume(vol); err != nil {
+	// 	return nil, status.Errorf(codes.Internal, "could not update volume %s: %v", vol.VolID, err)
+	// }
 
-	return &csi.ControllerUnpublishVolumeResponse{}, nil
+	// return &csi.ControllerUnpublishVolumeResponse{}, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
@@ -814,9 +816,9 @@ func (hp *hostPath) getControllerServiceCapabilities() []*csi.ControllerServiceC
 		// if hp.config.EnableVolumeExpansion && !hp.config.DisableControllerExpansion {
 		// 	cl = append(cl, csi.ControllerServiceCapability_RPC_EXPAND_VOLUME)
 		// }
-		if hp.config.EnableAttach {
-			cl = append(cl, csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME)
-		}
+		// if hp.config.EnableAttach {
+		// 	cl = append(cl, csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME)
+		// }
 	}
 
 	var csc []*csi.ControllerServiceCapability
