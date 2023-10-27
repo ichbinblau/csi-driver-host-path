@@ -22,7 +22,6 @@ import (
 	"strconv"
 
 	"github.com/golang/glog"
-	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/pborman/uuid"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
@@ -361,37 +360,38 @@ func (hp *hostPath) ControllerUnpublishVolume(ctx context.Context, req *csi.Cont
 }
 
 func (hp *hostPath) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
-	// Lock before acting on global state. A production-quality
-	// driver might use more fine-grained locking.
-	hp.mutex.Lock()
-	defer hp.mutex.Unlock()
+	// // Lock before acting on global state. A production-quality
+	// // driver might use more fine-grained locking.
+	// hp.mutex.Lock()
+	// defer hp.mutex.Unlock()
 
-	// Topology and capabilities are irrelevant. We only
-	// distinguish based on the "kind" parameter, if at all.
-	// Without configured capacity, we just have the maximum size.
-	available := hp.config.MaxVolumeSize
-	if hp.config.Capacity.Enabled() {
-		// Empty "kind" will return "zero capacity". There is no fallback
-		// to some arbitrary kind here because in practice it always should
-		// be set.
-		kind := req.GetParameters()[storageKind]
-		quantity := hp.config.Capacity[kind]
-		allocated := hp.sumVolumeSizes(kind)
-		available = quantity.Value() - allocated
-	}
-	maxVolumeSize := hp.config.MaxVolumeSize
-	if maxVolumeSize > available {
-		maxVolumeSize = available
-	}
+	// // Topology and capabilities are irrelevant. We only
+	// // distinguish based on the "kind" parameter, if at all.
+	// // Without configured capacity, we just have the maximum size.
+	// available := hp.config.MaxVolumeSize
+	// if hp.config.Capacity.Enabled() {
+	// 	// Empty "kind" will return "zero capacity". There is no fallback
+	// 	// to some arbitrary kind here because in practice it always should
+	// 	// be set.
+	// 	kind := req.GetParameters()[storageKind]
+	// 	quantity := hp.config.Capacity[kind]
+	// 	allocated := hp.sumVolumeSizes(kind)
+	// 	available = quantity.Value() - allocated
+	// }
+	// maxVolumeSize := hp.config.MaxVolumeSize
+	// if maxVolumeSize > available {
+	// 	maxVolumeSize = available
+	// }
 
-	return &csi.GetCapacityResponse{
-		AvailableCapacity: available,
-		MaximumVolumeSize: &wrappers.Int64Value{Value: maxVolumeSize},
+	// return &csi.GetCapacityResponse{
+	// 	AvailableCapacity: available,
+	// 	MaximumVolumeSize: &wrappers.Int64Value{Value: maxVolumeSize},
 
-		// We don't have a minimum volume size, so we might as well report that.
-		// Better explicit than implicit...
-		MinimumVolumeSize: &wrappers.Int64Value{Value: 0},
-	}, nil
+	// 	// We don't have a minimum volume size, so we might as well report that.
+	// 	// Better explicit than implicit...
+	// 	MinimumVolumeSize: &wrappers.Int64Value{Value: 0},
+	// }, nil
+	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (hp *hostPath) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
@@ -805,7 +805,7 @@ func (hp *hostPath) getControllerServiceCapabilities() []*csi.ControllerServiceC
 		cl = []csi.ControllerServiceCapability_RPC_Type{
 			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 			csi.ControllerServiceCapability_RPC_GET_VOLUME,
-			csi.ControllerServiceCapability_RPC_GET_CAPACITY,
+			// csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 			// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 			// csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
 			csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
